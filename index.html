@@ -356,10 +356,17 @@ function loadConfig() {
     const raw = localStorage.getItem(STORAGE_KEY_CONFIG);
     if (raw) {
       apiConfig = JSON.parse(raw);
-      document.getElementById('cfgToken').value     = apiConfig.token || '';
-      document.getElementById('cfgUrl').value       = apiConfig.url || '';
-      document.getElementById('cfgGroup').value     = apiConfig.group || '';
-      document.getElementById('cfgMilestone').value = apiConfig.milestone || '';
+      document.getElementById('cfgToken').value =
+        apiConfig?.token ?? 'glpat-JfjiRCcpVzfMx3VSLofR';
+
+      document.getElementById('cfgUrl').value =
+        apiConfig?.url ?? 'https://gitlab.4mti.com.br';
+
+      document.getElementById('cfgGroup').value =
+        apiConfig?.group ?? '94';
+
+      document.getElementById('cfgMilestone').value =
+        apiConfig?.milestone ?? 'Cliente) Porto Seguro - EPC';
     }
   } catch(e) {}
 }
