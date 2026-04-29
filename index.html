@@ -287,7 +287,7 @@
     <button class="btn primary" onclick="document.getElementById('shareModal').classList.remove('open')" style="margin-top:8px">Fechar</button>
   </div>
 </div>
-
+<script src="config.js"></script>
 <script>
 'use strict';
 
@@ -357,7 +357,7 @@ function loadConfig() {
     if (raw) {
       apiConfig = JSON.parse(raw);
       document.getElementById('cfgToken').value =
-        apiConfig?.token ?? 'glpat-JfjiRCcpVzfMx3VSLofR';
+        apiConfig?.token ?? '';
 
       document.getElementById('cfgUrl').value =
         apiConfig?.url ?? 'https://gitlab.4mti.com.br';

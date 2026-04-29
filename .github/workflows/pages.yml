@@ -18,10 +18,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Prepare files
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run script (generate CSV)
+        run: python gera_csv.py
+        env:
+          GITLAB_TOKEN: ${{ secrets.GITLABTOKEN }}
+
+      - name: Prepare public folder
         run: |
-          mkdir public
+          mkdir -p public
           cp index.html public/index.html
+          cp issues_EPC.csv public/
+
+      - name: Inject GitLab config (frontend secret bridge)
+        run: |
+          cat <<EOF > public/config.js
+window.__API_CONFIG__ = {
+  token: "${{ secrets.GITLABTOKEN }}"
+};
+EOF
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
