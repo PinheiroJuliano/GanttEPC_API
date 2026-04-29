@@ -294,10 +294,17 @@
 // ═══════════════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════════════
+const DEFAULT_CONFIG = {
+  token: "", // opcional
+  url: "https://gitlab.4mti.com.br",
+  group: "94",
+  milestone: "Cliente) Porto Seguro - EPC"
+};
+
 let allIssues = [];
 let manualData = {};        // { iid: { status, progress } }
 let isReadonlyMode = false; // true quando veio de URL compartilhada
-let apiConfig = {};
+let apiConfig = {...DEFAULT_CONFIG };
 
 const STATUS = { ANDAMENTO: 'Andamento', PAUSADA: 'Pausada', CONCLUIDA: 'Concluída', AGUARDANDO: 'Aguardando' };
 const BAR_COLORS = {
@@ -355,9 +362,7 @@ function loadConfig() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_CONFIG);
     if (raw) {
-      apiConfig = JSON.parse(raw);
-      document.getElementById('cfgToken').value =
-        apiConfig?.token ?? '';
+      apiConfig = { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
 
       document.getElementById('cfgUrl').value =
         apiConfig?.url ?? 'https://gitlab.4mti.com.br';
@@ -430,10 +435,17 @@ function tryLoadFromHash() {
     // Restaurar config
     if (payload.cfg) {
       apiConfig = payload.cfg;
-      document.getElementById('cfgToken').value     = payload.cfg.token || '';
-      document.getElementById('cfgUrl').value       = payload.cfg.url || '';
-      document.getElementById('cfgGroup').value     = payload.cfg.group || '';
-      document.getElementById('cfgMilestone').value = payload.cfg.milestone || '';
+      document.getElementById('cfgToken').value =
+        apiConfig.token ?? DEFAULT_CONFIG.token;
+
+      document.getElementById('cfgUrl').value =
+        apiConfig.url ?? DEFAULT_CONFIG.url;
+
+      document.getElementById('cfgGroup').value =
+        apiConfig.group ?? DEFAULT_CONFIG.group;
+
+      document.getElementById('cfgMilestone').value =
+        apiConfig.milestone ?? DEFAULT_CONFIG.milestone;
     }
 
     // Restaurar filtros
