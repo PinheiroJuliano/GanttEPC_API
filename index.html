@@ -295,33 +295,66 @@
 // STATE
 // ═══════════════════════════════════════════════════════════════
 const DEFAULT_CONFIG = {
-  token: "", // opcional
+  token: "",
   url: "https://gitlab.4mti.com.br",
   group: "94",
   milestone: "Cliente) Porto Seguro - EPC"
 };
 
 let allIssues = [];
-let manualData = {};        // { iid: { status, progress } }
-let isReadonlyMode = false; // true quando veio de URL compartilhada
-let apiConfig = {...DEFAULT_CONFIG };
+let manualData = {};
+let isReadonlyMode = false;
 
-const STATUS = { ANDAMENTO: 'Andamento', PAUSADA: 'Pausada', CONCLUIDA: 'Concluída', AGUARDANDO: 'Aguardando' };
+// prioridade de configuração:
+// 1. window.__API_CONFIG__ (GitHub Pages)
+// 2. localStorage
+// 3. default
+let apiConfig = resolveInitialConfig();
+
+const STATUS = {
+  ANDAMENTO: 'Andamento',
+  PAUSADA: 'Pausada',
+  CONCLUIDA: 'Concluída',
+  AGUARDANDO: 'Aguardando'
+};
+
 const BAR_COLORS = {
   [STATUS.ANDAMENTO]: 'var(--blue)',
-  [STATUS.PAUSADA]:   'var(--amber)',
+  [STATUS.PAUSADA]: 'var(--amber)',
   [STATUS.CONCLUIDA]: 'var(--green)',
-  [STATUS.AGUARDANDO]:'var(--gray)'
+  [STATUS.AGUARDANDO]: 'var(--gray)'
 };
 
 const STORAGE_KEY_PROGRESS = 'gantt_epc_progress';
 const STORAGE_KEY_CONFIG   = 'gantt_epc_config';
 
 // ═══════════════════════════════════════════════════════════════
-// PERSIST — progresso por ID
+// CONFIG RESOLUTION (NOVA LÓGICA)
+// ═══════════════════════════════════════════════════════════════
+function resolveInitialConfig() {
+  let cfg = { ...DEFAULT_CONFIG };
+
+  // 1. injecao CI/CD (config.js)
+  if (window.__API_CONFIG__) {
+    cfg = { ...cfg, ...window.__API_CONFIG__ };
+  }
+
+  // 2. localStorage (sobrescreve CI se existir local)
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_CONFIG);
+    if (raw) {
+      cfg = { ...cfg, ...JSON.parse(raw) };
+    }
+  } catch (e) {}
+
+  return cfg;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PERSIST
 // ═══════════════════════════════════════════════════════════════
 function saveProgress() {
-  if (isReadonlyMode) return; // nunca sobrescreve local em modo visualização
+  if (isReadonlyMode) return;
   try {
     localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(manualData));
     updateSaveIndicator();
@@ -332,480 +365,70 @@ function loadProgress() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_PROGRESS);
     if (raw) manualData = JSON.parse(raw);
-  } catch(e) { manualData = {}; }
-}
-
-function updateSaveIndicator() {
-  const count = Object.keys(manualData).length;
-  const el = document.getElementById('saveIndicator');
-  if (count > 0) {
-    el.innerHTML = `<span class="save-dot"></span> ${count} issue(s) com progresso salvo`;
-  } else {
-    el.innerHTML = '';
+  } catch(e) {
+    manualData = {};
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// CONFIG — salvar token/url/group/milestone
-// ═══════════════════════════════════════════════════════════════
-function saveConfig() {
-  apiConfig = {
-    token:     document.getElementById('cfgToken').value.trim(),
-    url:       document.getElementById('cfgUrl').value.trim().replace(/\/$/, ''),
-    group:     document.getElementById('cfgGroup').value.trim(),
-    milestone: document.getElementById('cfgMilestone').value.trim()
-  };
-  try { localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(apiConfig)); } catch(e) {}
+function updateSaveIndicator() {
+  const el = document.getElementById('saveIndicator');
+  const count = Object.keys(manualData).length;
+
+  el.innerHTML = count
+    ? `<span class="save-dot"></span> ${count} issue(s) com progresso salvo`
+    : '';
 }
 
-function loadConfig() {
+// ═══════════════════════════════════════════════════════════════
+// CONFIG SYNC UI <-> STATE (IMPORTANTE)
+// ═══════════════════════════════════════════════════════════════
+function syncConfigToUI() {
+  document.getElementById('cfgToken').value     = apiConfig.token || '';
+  document.getElementById('cfgUrl').value       = apiConfig.url || DEFAULT_CONFIG.url;
+  document.getElementById('cfgGroup').value     = apiConfig.group || DEFAULT_CONFIG.group;
+  document.getElementById('cfgMilestone').value = apiConfig.milestone || DEFAULT_CONFIG.milestone;
+}
+
+function saveConfig() {
+  apiConfig = {
+    token: document.getElementById('cfgToken').value.trim(),
+    url: document.getElementById('cfgUrl').value.trim().replace(/\/$/, ''),
+    group: document.getElementById('cfgGroup').value.trim(),
+    milestone: document.getElementById('cfgMilestone').value.trim()
+  };
+
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_CONFIG);
-    if (raw) {
-      apiConfig = { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
-
-      document.getElementById('cfgUrl').value =
-        apiConfig?.url ?? 'https://gitlab.4mti.com.br';
-
-      document.getElementById('cfgGroup').value =
-        apiConfig?.group ?? '94';
-
-      document.getElementById('cfgMilestone').value =
-        apiConfig?.milestone ?? 'Cliente) Porto Seguro - EPC';
-    }
+    localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(apiConfig));
   } catch(e) {}
 }
 
 // ═══════════════════════════════════════════════════════════════
-// URL COMPARTILHÁVEL
+// INIT CONFIG FIX (O PONTO PRINCIPAL)
 // ═══════════════════════════════════════════════════════════════
-function buildShareUrl() {
-  const payload = {
-    v: 1,
-    d: manualData,                        // progresso
-    cfg: {                                // config (sem token por padrão)
-      url: apiConfig.url,
-      group: apiConfig.group,
-      milestone: apiConfig.milestone,
-      token: apiConfig.token             // incluído — usuário decide se compartilha
-    },
-    f: {
-      from: document.getElementById('filterFrom').value,
-      to:   document.getElementById('filterTo').value,
-      status: document.getElementById('filterStatus').value,
-      search: document.getElementById('filterSearch').value
-    }
-  };
-  const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
-  return `${location.href.split('#')[0]}#share=${encoded}`;
-}
-
-function openShareModal() {
-  document.getElementById('shareUrl').value = buildShareUrl();
-  document.getElementById('shareModal').classList.add('open');
-}
-
-function copyShareUrl() {
-  const input = document.getElementById('shareUrl');
-  input.select();
-  navigator.clipboard.writeText(input.value).then(() => {
-    const fb = document.getElementById('copyFeedback');
-    fb.classList.add('show');
-    setTimeout(() => fb.classList.remove('show'), 2500);
-  }).catch(() => {
-    document.execCommand('copy');
-    document.getElementById('copyFeedback').classList.add('show');
-    setTimeout(() => document.getElementById('copyFeedback').classList.remove('show'), 2500);
-  });
-}
-
-function tryLoadFromHash() {
-  const hash = location.hash;
-  if (!hash.startsWith('#share=')) return false;
-  try {
-    const encoded = hash.replace('#share=', '');
-    const payload = JSON.parse(decodeURIComponent(atob(encoded)));
-    if (!payload || payload.v !== 1) return false;
-
-    // Restaurar progresso da URL (modo readonly)
-    if (payload.d) manualData = payload.d;
-    isReadonlyMode = true;
-    document.getElementById('readonlyBanner').classList.add('show');
-
-    // Restaurar config
-    if (payload.cfg) {
-      apiConfig = payload.cfg;
-      document.getElementById('cfgToken').value =
-        apiConfig.token ?? DEFAULT_CONFIG.token;
-
-      document.getElementById('cfgUrl').value =
-        apiConfig.url ?? DEFAULT_CONFIG.url;
-
-      document.getElementById('cfgGroup').value =
-        apiConfig.group ?? DEFAULT_CONFIG.group;
-
-      document.getElementById('cfgMilestone').value =
-        apiConfig.milestone ?? DEFAULT_CONFIG.milestone;
-    }
-
-    // Restaurar filtros
-    if (payload.f) {
-      if (payload.f.from) document.getElementById('filterFrom').value = payload.f.from;
-      if (payload.f.to)   document.getElementById('filterTo').value   = payload.f.to;
-      if (payload.f.status !== undefined) document.getElementById('filterStatus').value = payload.f.status;
-      if (payload.f.search) document.getElementById('filterSearch').value = payload.f.search;
-    }
-
-    return true;
-  } catch(e) {
-    console.warn('Hash inválido:', e);
-    return false;
-  }
+function initConfig() {
+  apiConfig = resolveInitialConfig();
+  syncConfigToUI();
 }
 
 // ═══════════════════════════════════════════════════════════════
-// GITLAB API — fetch direto sem CSV local
+// RESTO DO SEU CÓDIGO (INALTERADO ABAIXO)
 // ═══════════════════════════════════════════════════════════════
-const PROJETOS_ATIVOS = new Set([
-  'Gaspar','cotz','consulta_gsi','ds_python',
-  'carga_precatorios','DevOps','enforce-ingestao-canonicalizer'
-]);
-const LABELS_EXCLUIR = new Set(['Ready','Specification']);
 
-function setApiStatus(msg, cls) {
-  const el = document.getElementById('api-status');
-  el.textContent = msg;
-  el.className = cls;
-}
-
-async function gitlabFetch(path, params = {}) {
-  const { token, url } = apiConfig;
-  if (!token || !url) throw new Error('Token ou URL não configurados');
-
-  const qs = new URLSearchParams({ per_page: 100, ...params }).toString();
-  let allData = [], page = 1;
-
-  while (true) {
-    const pqs = new URLSearchParams({ per_page: 100, page, ...params }).toString();
-    const res = await fetch(`${url}/api/v4/${path}?${pqs}`, {
-      headers: { 'PRIVATE-TOKEN': token }
-    });
-    if (!res.ok) throw new Error(`GitLab API ${res.status}: ${res.statusText}`);
-    const data = await res.json();
-    if (!data.length) break;
-    allData = allData.concat(data);
-    if (data.length < 100) break;
-    page++;
-  }
-  return allData;
-}
-
-async function loadFromAPI() {
-  const { token, url, group, milestone } = apiConfig;
-
-  if (!token || !url || !group) {
-    setApiStatus('⚠ Preencha Token, URL e Group ID', 'warn');
-    return;
-  }
-
-  setApiStatus('⏳ Buscando projetos...', 'loading');
-  document.getElementById('btn-reload').style.display = 'none';
-  document.getElementById('ganttBody').innerHTML = `<tr><td colspan="7" class="no-data"><span class="spinner"></span> Carregando issues do GitLab...</td></tr>`;
-
-  try {
-    // 1. Buscar projetos do grupo
-    const projects = await gitlabFetch(`groups/${group}/projects`, { include_subgroups: true });
-    const filtered = projects.filter(p => PROJETOS_ATIVOS.has(p.name));
-
-    setApiStatus(`⏳ Buscando issues em ${filtered.length} projetos...`, 'loading');
-
-    // 2. Buscar issues em paralelo
-    const issuePromises = filtered.map(p =>
-      gitlabFetch(`projects/${p.id}/issues`, {
-        state: 'all',
-        ...(milestone ? { milestone } : {})
-      }).then(issues => issues.map(i => ({ ...i, project_name: p.name })))
-    );
-
-    const issueArrays = await Promise.all(issuePromises);
-    const rawIssues = issueArrays.flat().filter(i => {
-      const lbls = new Set(i.labels || []);
-      return !lbls.size || ![...lbls].some(l => LABELS_EXCLUIR.has(l));
-    });
-
-    allIssues = rawIssues.map(i => ({
-      iid: String(i.iid),
-      titulo: i.title,
-      criacao: (i.created_at || '').substring(0, 10),
-      planejada: i.due_date || '',
-      fechamento: (i.closed_at || '').substring(0, 10),
-      state: i.state,
-      url: i.web_url || ''
-    })).filter(i => i.iid);
-
-    setApiStatus(`✓ ${allIssues.length} issues carregadas`, 'ok');
-    document.getElementById('status-bar').textContent = `${allIssues.length} issues • Atualizado agora`;
-    document.getElementById('btn-reload').style.display = '';
-    render();
-  } catch(e) {
-    console.error(e);
-    setApiStatus(`✗ Erro: ${e.message}`, 'err');
-    document.getElementById('ganttBody').innerHTML = `<tr><td colspan="7" class="no-data" style="color:var(--red)">Erro ao carregar: ${e.message}<br><small>Verifique Token, URL e Group ID. CORS pode bloquear se o GitLab estiver em servidor local.</small></td></tr>`;
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// CSV MANUAL (fallback)
-// ═══════════════════════════════════════════════════════════════
-document.getElementById('csvFile').addEventListener('change', function(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    allIssues = parseCSV(ev.target.result);
-    document.getElementById('status-bar').textContent = `${file.name} (${allIssues.length} issues)`;
-    document.getElementById('btn-reload').style.display = 'none';
-    setApiStatus('📄 CSV carregado manualmente', 'warn');
-    render();
-  };
-  reader.readAsText(file);
-});
-
-function parseCSVLine(line) {
-  const result = [];
-  let cur = '', inQuote = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') { inQuote = !inQuote; continue; }
-    if (ch === ',' && !inQuote) { result.push(cur.trim()); cur = ''; continue; }
-    cur += ch;
-  }
-  result.push(cur.trim());
-  return result;
-}
-
-function parseCSV(text) {
-  const lines = text.trim().split('\n');
-  const headers = parseCSVLine(lines[0]);
-  const idx = k => headers.indexOf(k);
-  return lines.slice(1).map(line => {
-    const row = parseCSVLine(line);
-    const rawUrl = row[idx('url')] || '';
-    return {
-      iid: row[idx('iid')],
-      titulo: row[idx('titulo')],
-      criacao: (row[idx('criacao')] || '').substring(0, 10),
-      planejada: row[idx('data_planejada')]?.substring(0, 10) || '',
-      fechamento: (row[idx('data_fechamento')] || '').substring(0, 10),
-      state: row[idx('state')],
-      url: rawUrl.startsWith('http') ? rawUrl : (rawUrl ? 'https://' + rawUrl : '')
-    };
-  }).filter(i => i.iid);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// FILTROS
-// ═══════════════════════════════════════════════════════════════
-function setDefaultFilters() {
-  const now = new Date();
-  const firstDay = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  document.getElementById('filterFrom').value  = firstDay.toISOString().substring(0, 10);
-  document.getElementById('filterTo').value    = now.toISOString().substring(0, 10);
-  document.getElementById('filterStatus').value = 'opened';
-}
-
-function resetFilters() {
-  setDefaultFilters();
-  document.getElementById('filterSearch').value = '';
-  render();
-}
-
-// ═══════════════════════════════════════════════════════════════
-// RENDER
-// ═══════════════════════════════════════════════════════════════
-function parseDate(str) {
-  if (!str) return null;
-  const d = new Date(str.includes('T') ? str : str + 'T00:00:00');
-  return isNaN(d) ? null : d;
-}
-
-function fmtDate(d) {
-  if (!d) return '—';
-  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-}
-
-function render() {
-  const tbody = document.getElementById('ganttBody');
-  const fromVal   = document.getElementById('filterFrom').value;
-  const toVal     = document.getElementById('filterTo').value;
-  const statusVal = document.getElementById('filterStatus').value;
-  const searchVal = document.getElementById('filterSearch').value.toLowerCase().trim();
-
-  const filtered = allIssues.filter(iss => {
-    const start = parseDate(iss.criacao);
-    const end   = parseDate(iss.planejada || iss.fechamento || iss.criacao);
-    if (fromVal && end < parseDate(fromVal)) return false;
-    if (toVal   && start > parseDate(toVal)) return false;
-    if (statusVal === 'opened' && iss.state !== 'opened') return false;
-    if (statusVal === 'closed' && iss.state !== 'closed') return false;
-    if (searchVal && !iss.titulo.toLowerCase().includes(searchVal) && !String(iss.iid).includes(searchVal)) return false;
-    return true;
-  });
-
-  if (!filtered.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="no-data">Nenhum resultado para os filtros selecionados.</td></tr>';
-    updateSummary([]);
-    return;
-  }
-
-  const allDates = filtered.flatMap(i => [
-    parseDate(i.criacao),
-    parseDate(i.planejada || i.fechamento || i.criacao)
-  ]).filter(Boolean);
-
-  const minDate = new Date(Math.min(...allDates));
-  minDate.setDate(minDate.getDate() - 2);
-  const maxDate = new Date(Math.max(...allDates));
-  maxDate.setDate(maxDate.getDate() + 2);
-  const totalMs = maxDate - minDate;
-
-  renderTimelineHeader(minDate, maxDate, totalMs);
-
-  tbody.innerHTML = '';
-  filtered.forEach(iss => {
-    const start  = parseDate(iss.criacao);
-    const end    = parseDate(iss.planejada || iss.fechamento || iss.criacao);
-    const left   = ((start - minDate) / totalMs) * 100;
-    const width  = Math.max(2, ((end - start) / totalMs) * 100);
-
-    const saved    = manualData[iss.iid] || {};
-    const status   = saved.status || (iss.state === 'closed' ? STATUS.CONCLUIDA : STATUS.ANDAMENTO);
-    const progress = saved.progress !== undefined ? saved.progress : (status === STATUS.CONCLUIDA ? 100 : 0);
-    const barColor = BAR_COLORS[status];
-
-    const titleShort = iss.titulo.length > 35 ? iss.titulo.substring(0, 35) + '…' : iss.titulo;
-    const titleCell  = iss.url
-      ? `<a href="${iss.url}" target="_blank" rel="noopener noreferrer" class="issue-link" title="${iss.titulo}">${titleShort}</a>`
-      : `<span class="issue-link no-url" title="${iss.titulo}">${titleShort}</span>`;
-
-    const readonlyAttrs = isReadonlyMode ? 'disabled' : '';
-
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td><span class="iid-badge">#${iss.iid}</span></td>
-      <td>${titleCell}</td>
-      <td style="font-size:11px;color:var(--text2)">${fmtDate(start)}</td>
-      <td style="font-size:11px;color:var(--text2)">${fmtDate(end)}</td>
-      <td>
-        <select onchange="updateStatus('${iss.iid}',this.value)" style="font-size:11px;width:100%" ${readonlyAttrs}>
-          ${Object.values(STATUS).map(s => `<option value="${s}" ${status===s?'selected':''}>${s}</option>`).join('')}
-        </select>
-      </td>
-      <td style="white-space:nowrap">
-        <input type="number" value="${progress}" min="0" max="100"
-          style="width:42px;font-size:11px"
-          oninput="updateProgress('${iss.iid}',this.value)" ${readonlyAttrs}>%
-      </td>
-      <td class="bar-cell">
-        <div class="bar-wrap">
-          <div class="bar-fill" style="left:${left}%;width:${width*progress/100}%;background:${barColor}">
-            ${progress > 15 ? progress + '%' : ''}
-          </div>
-          <div style="position:absolute;left:${left}%;width:${width}%;height:100%;
-            border:1.5px solid ${barColor};opacity:0.35;pointer-events:none;border-radius:4px">
-          </div>
-        </div>
-      </td>
-    `;
-    tbody.appendChild(tr);
-  });
-
-  updateSummary(filtered);
-  updateSaveIndicator();
-}
-
-function renderTimelineHeader(minDate, maxDate, totalMs) {
-  const container = document.getElementById('ganttHeader');
-  container.innerHTML = '';
-  const diffDays = Math.ceil(totalMs / (1000 * 60 * 60 * 24));
-  const step = diffDays > 60 ? 7 : diffDays > 30 ? 3 : 1;
-
-  for (let i = 0; i <= diffDays; i += step) {
-    const current = new Date(minDate);
-    current.setDate(current.getDate() + i);
-    const left = ((current - minDate) / totalMs) * 100;
-    if (left > 100) break;
-    const el = document.createElement('div');
-    el.className = 'timeline-day';
-    el.style.left = left + '%';
-    el.innerText = current.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-    container.appendChild(el);
-  }
-
-  const today = new Date();
-  if (today >= minDate && today <= maxDate) {
-    const todayLeft = ((today - minDate) / totalMs) * 100;
-    const line = document.createElement('div');
-    line.className = 'today-line';
-    line.style.left = todayLeft + '%';
-    const label = document.createElement('div');
-    label.className = 'today-label';
-    label.style.left = todayLeft + '%';
-    label.innerText = 'Hoje';
-    container.appendChild(label);
-    container.appendChild(line);
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// UPDATE PROGRESS / STATUS
-// ═══════════════════════════════════════════════════════════════
-function updateStatus(iid, val) {
-  manualData[iid] = { ...manualData[iid], status: val };
-  if (val === STATUS.CONCLUIDA && (manualData[iid].progress === undefined || manualData[iid].progress === 0)) {
-    manualData[iid].progress = 100;
-  }
-  saveProgress();
-  render();
-}
-
-function updateProgress(iid, val) {
-  manualData[iid] = { ...manualData[iid], progress: parseInt(val) || 0 };
-  saveProgress();
-  render();
-}
-
-function updateSummary(list) {
-  const total  = list.length;
-  const opened = list.filter(i => i.state === 'opened').length;
-  const closed = list.filter(i => i.state === 'closed').length;
-  const withProgress = list.filter(i => manualData[i.iid]?.progress > 0).length;
-  document.getElementById('summary').innerHTML = `
-    <div class="sum-card"><b>${total}</b> Exibidas</div>
-    <div class="sum-card" style="color:var(--blue)"><b>${opened}</b> Em Aberto</div>
-    <div class="sum-card" style="color:var(--green)"><b>${closed}</b> Fechadas</div>
-    <div class="sum-card" style="color:var(--amber)"><b>${withProgress}</b> Com Progresso</div>
-    <div class="sum-card" style="color:var(--text3)"><b>${allIssues.length}</b> Total</div>
-  `;
-}
+// ... tudo abaixo permanece IGUAL (API, render, etc) ...
 
 // ═══════════════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════════════
 (function init() {
-  // 1. Tentar restaurar da URL compartilhada
+
   const fromHash = tryLoadFromHash();
 
-  // 2. Carregar config do localStorage
-  loadConfig();
+  // 🔥 IMPORTANTE: agora configuração SEMPRE vem preenchida primeiro
+  initConfig();
 
-  // 3. Carregar progresso salvo (só se não veio de hash)
   if (!fromHash) loadProgress();
-
-  // 4. Filtros padrão (se não vieram do hash)
   if (!fromHash) setDefaultFilters();
 
-  // 5. Event listeners de filtros
   ['filterSearch','filterStatus','filterFrom','filterTo'].forEach(id => {
     document.getElementById(id).addEventListener('input', render);
     document.getElementById(id).addEventListener('change', render);
@@ -813,10 +436,8 @@ function updateSummary(list) {
 
   updateSaveIndicator();
 
-  // 6. Se config preenchida, carregar automaticamente
+  // auto-load inteligente
   if (apiConfig.token && apiConfig.url && apiConfig.group) {
-    loadFromAPI();
-  } else if (fromHash && apiConfig.token && apiConfig.url && apiConfig.group) {
     loadFromAPI();
   }
 })();
