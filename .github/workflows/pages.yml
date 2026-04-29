@@ -40,10 +40,20 @@ jobs:
       - name: Inject GitLab config (frontend secret bridge)
         run: |
           cat <<EOF > public/config.js
-window.__API_CONFIG__ = {
-  token: "${{ secrets.GITLABTOKEN }}"
-};
+    window.__API_CONFIG__ = {
+      token: "${{ secrets.GITLABTOKEN }}",
+      url: "https://gitlab.4mti.com.br",
+      group: "94",
+      milestone: "Cliente) Porto Seguro - EPC"
+    };
+
+    if (window.__API_CONFIG__) {
+        apiConfig = { ...apiConfig, ...window.__API_CONFIG__ };
+        }
+        shell: bash 
 EOF
+
+
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
